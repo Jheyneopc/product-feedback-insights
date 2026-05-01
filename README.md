@@ -1,7 +1,12 @@
-# Product Feedback Insights
-
-## Overview
-This project analyzes user feedback to extract insights and support product decisions.
-
 ## Dataset
-Dataset not included. Download from Kaggle and place it in the `data/` folder.
+
+This project uses the **Sephora Skincare Reviews Dataset** from Kaggle.
+
+Dataset Link:
+https://www.kaggle.com/code/melissamonfared/skincare-products-eda-sentiment-analysis
+
+Expected files:
+- data/product_info.csv
+- data/reviews_*.csv
+
+Note: Dataset is not included in this repository (see .gitignore)
