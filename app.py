@@ -1,14 +1,17 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+from openai import OpenAI
+import os
 
 st.set_page_config(
-    page_title="Smart Feedback Insights",
+    page_title="AI-Powered Product Feedback Insights",
     layout="wide"
 )
 
-df = pd.read_csv("data/product_info_2.csv")
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
+df = pd.read_csv("data/product_info_2.csv")
 df = df.dropna(subset=["rating", "reviews", "price_usd", "primary_category"])
 
 
@@ -21,81 +24,157 @@ def label_sentiment(rating):
         return "Negative"
 
 
-def generate_recommendation(row):
-    if row["rating"] >= 4.5 and row["reviews"] > 100:
-        return "High performance: consider promoting this product"
-    elif row["rating"] >= 3:
-        return "Moderate performance: monitor feedback"
-    else:
-        return "Low performance: investigate issues"
-
-
 def generate_ai_feedback(row):
     if row["rating"] < 2.5:
-        return "Critical performance issue. Immediate action required on product quality or pricing."
+        return "Critical issue: investigate product quality, pricing, or customer satisfaction."
     elif row["rating"] < 3:
-        return "Low rating detected. Monitor closely and investigate customer complaints."
+        return "Low rating: monitor closely and review customer complaints."
     elif row["rating"] >= 4.5 and row["reviews"] >= 100:
-        return "Excellent performance. Consider scaling marketing and promotions."
+        return "Excellent performance: consider marketing and promotion."
     elif row["rating"] >= 4:
-        return "Strong product performance. Maintain strategy and monitor trends."
+        return "Strong performance: maintain strategy and monitor trends."
     else:
-        return "Average performance. Evaluate customer feedback for improvement opportunities."
+        return "Average performance: evaluate improvement opportunities."
+
+
+def generate_data_summary(data):
+    if len(data) == 0:
+        return "No products match the selected filters."
+
+    top_categories = data["primary_category"].value_counts().head(5).to_dict()
+    sentiment_distribution = data["sentiment"].value_counts().to_dict()
+
+    top_products = (
+        data.sort_values(by=["rating", "reviews"], ascending=False)
+        [["product_name", "brand_name", "primary_category", "rating", "reviews", "price_usd"]]
+        .head(8)
+        .to_dict(orient="records")
+    )
+
+    low_products = (
+        data.sort_values(by=["rating", "reviews"], ascending=[True, False])
+        [["product_name", "brand_name", "primary_category", "rating", "reviews", "price_usd"]]
+        .head(8)
+        .to_dict(orient="records")
+    )
+
+    return f"""
+    Total products: {len(data)}
+    Average rating: {round(data["rating"].mean(), 2)}
+    Total reviews: {int(data["reviews"].sum())}
+    Average price: {round(data["price_usd"].mean(), 2)}
+
+    Sentiment distribution:
+    {sentiment_distribution}
+
+    Top product categories:
+    {top_categories}
+
+    Top-performing products:
+    {top_products}
+
+    Low-performing products:
+    {low_products}
+    """
+
+
+def ask_openai(prompt):
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "You are an AI product management assistant. "
+                    "Answer only based on the product data provided. "
+                    "Do not invent information. "
+                    "Give clear, practical, and actionable recommendations. "
+                    "Answer in the same language as the user."
+                )
+            },
+            {
+                "role": "user",
+                "content": prompt
+            }
+        ],
+        temperature=0.4
+    )
+
+    return response.choices[0].message.content
 
 
 df["sentiment"] = df["rating"].apply(label_sentiment)
-df["recommendation"] = df.apply(generate_recommendation, axis=1)
 df["ai_feedback"] = df.apply(generate_ai_feedback, axis=1)
+
 
 st.markdown("""
 <style>
-.main {
-    background-color: #fbf8ff;
+.stApp {
+    background-color: #f7f8fc;
 }
 
-.big-title {
-    font-size: 38px;
+section[data-testid="stSidebar"] {
+    background-color: #071427;
+}
+
+section[data-testid="stSidebar"] * {
+    color: white;
+}
+
+.main-title {
+    font-size: 34px;
     font-weight: 800;
-    color: #32235c;
+    color: #071427;
+    margin-bottom: 5px;
 }
 
 .subtitle {
-    font-size: 18px;
-    color: #d9468c;
+    font-size: 15px;
+    color: #2563eb;
     margin-bottom: 25px;
 }
 
 .card {
-    padding: 20px;
-    border-radius: 18px;
+    padding: 22px;
+    border-radius: 14px;
     background-color: white;
-    box-shadow: 0px 4px 14px rgba(80, 50, 120, 0.12);
-    border: 1px solid #eee4ff;
+    box-shadow: 0px 4px 14px rgba(0, 0, 0, 0.08);
+    border: 1px solid #eef2f7;
 }
 
 .metric-label {
-    font-size: 15px;
-    color: #6b5b85;
+    font-size: 14px;
+    color: #64748b;
 }
 
 .metric-value {
-    font-size: 32px;
+    font-size: 30px;
     font-weight: 800;
-    color: #32235c;
+    color: #071427;
 }
 
 .section-title {
     font-size: 24px;
     font-weight: 700;
-    color: #32235c;
+    color: #071427;
     margin-top: 30px;
     margin-bottom: 10px;
+}
+
+.ai-box {
+    padding: 22px;
+    border-radius: 14px;
+    background-color: #ffffff;
+    border-left: 5px solid #2563eb;
+    box-shadow: 0px 4px 14px rgba(0, 0, 0, 0.08);
+    margin-top: 15px;
 }
 </style>
 """, unsafe_allow_html=True)
 
+
 st.sidebar.title("Smart Feedback Insights")
-st.sidebar.write("Cosmetics Product Feedback Analytics")
+st.sidebar.write("AI-powered cosmetics product feedback analytics")
 
 categories = ["All"] + sorted(df["primary_category"].dropna().unique().tolist())
 selected_category = st.sidebar.selectbox("Filter by Product Category", categories)
@@ -115,15 +194,17 @@ if selected_sentiment != "All":
 
 filtered_df = filtered_df[filtered_df["rating"] >= min_rating]
 
+
 st.markdown(
-    '<div class="big-title">Smart Feedback Insights for Product Management</div>',
+    '<div class="main-title">AI-Powered Product Feedback Insights</div>',
     unsafe_allow_html=True
 )
 
 st.markdown(
-    '<div class="subtitle">Cosmetics product feedback analytics dashboard</div>',
+    '<div class="subtitle">Smart analytics dashboard for cosmetics product management</div>',
     unsafe_allow_html=True
 )
+
 
 col1, col2, col3, col4 = st.columns(4)
 
@@ -136,10 +217,11 @@ with col1:
     """, unsafe_allow_html=True)
 
 with col2:
+    avg_rating_display = 0 if len(filtered_df) == 0 else filtered_df["rating"].mean()
     st.markdown(f"""
     <div class="card">
         <div class="metric-label">Average Rating</div>
-        <div class="metric-value">{filtered_df["rating"].mean():.2f}</div>
+        <div class="metric-value">{avg_rating_display:.2f}</div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -152,12 +234,14 @@ with col3:
     """, unsafe_allow_html=True)
 
 with col4:
+    needs_review = len(filtered_df[filtered_df["sentiment"] == "Negative"])
     st.markdown(f"""
     <div class="card">
-        <div class="metric-label">Selected Products</div>
-        <div class="metric-value">{len(filtered_df):,}</div>
+        <div class="metric-label">Products Needing Review</div>
+        <div class="metric-value">{needs_review:,}</div>
     </div>
     """, unsafe_allow_html=True)
+
 
 st.markdown('<div class="section-title">Dashboard Overview</div>', unsafe_allow_html=True)
 
@@ -173,7 +257,18 @@ with chart_col1:
         sentiment_counts,
         names="sentiment",
         values="count",
-        hole=0.5
+        hole=0.55,
+        color="sentiment",
+        color_discrete_map={
+            "Positive": "#22c55e",
+            "Neutral": "#facc15",
+            "Negative": "#ef4444"
+        }
+    )
+
+    fig.update_layout(
+        paper_bgcolor="#f7f8fc",
+        plot_bgcolor="#f7f8fc"
     )
 
     st.plotly_chart(fig, use_container_width=True)
@@ -181,21 +276,63 @@ with chart_col1:
 with chart_col2:
     st.subheader("Top Product Categories")
 
-    st.bar_chart(
+    category_counts = (
         filtered_df["primary_category"]
         .value_counts()
         .sort_values(ascending=False)
         .head(10)
+        .reset_index()
     )
+
+    category_counts.columns = ["category", "count"]
+
+    fig2 = px.bar(
+        category_counts,
+        x="category",
+        y="count",
+        color="count",
+        color_continuous_scale="Blues"
+    )
+
+    fig2.update_layout(
+        xaxis_title="Product Category",
+        yaxis_title="Number of Products",
+        paper_bgcolor="#f7f8fc",
+        plot_bgcolor="#f7f8fc"
+    )
+
+    st.plotly_chart(fig2, use_container_width=True)
+
 
 st.subheader("Rating Distribution")
 
-st.bar_chart(
+rating_counts = (
     filtered_df["rating"]
     .round(1)
     .value_counts()
     .sort_index()
+    .reset_index()
 )
+
+rating_counts.columns = ["rating", "count"]
+
+fig3 = px.bar(
+    rating_counts,
+    x="rating",
+    y="count",
+    color="count",
+    color_continuous_scale="Purples"
+)
+
+fig3.update_layout(
+    xaxis_title="Rating",
+    yaxis_title="Number of Products",
+    paper_bgcolor="#f7f8fc",
+    plot_bgcolor="#f7f8fc"
+)
+
+st.plotly_chart(fig3, use_container_width=True)
+
 
 st.markdown('<div class="section-title">Reviews Explorer</div>', unsafe_allow_html=True)
 
@@ -212,36 +349,18 @@ st.dataframe(
     use_container_width=True
 )
 
-st.markdown('<div class="section-title">AI-Style Recommendations</div>', unsafe_allow_html=True)
+
+st.markdown('<div class="section-title">AI Insights & Recommendations</div>', unsafe_allow_html=True)
 
 recommended_df = filtered_df.sort_values(by="rating", ascending=False)
 
-rec_col1, rec_col2 = st.columns(2)
+st.dataframe(
+    recommended_df[
+        ["product_name", "rating", "ai_feedback"]
+    ].head(15),
+    use_container_width=True
+)
 
-with rec_col1:
-    st.subheader("Recommended Actions")
-
-    st.dataframe(
-        recommended_df[[
-            "product_name",
-            "rating",
-            "reviews",
-            "recommendation"
-        ]].head(15),
-        use_container_width=True
-    )
-
-with rec_col2:
-    st.subheader("AI Feedback")
-
-    st.dataframe(
-        recommended_df[[
-            "product_name",
-            "rating",
-            "ai_feedback"
-        ]].head(15),
-        use_container_width=True
-    )
 
 st.markdown('<div class="section-title">Low-Performing Products</div>', unsafe_allow_html=True)
 
@@ -256,11 +375,11 @@ st.dataframe(
         "brand_name",
         "rating",
         "reviews",
-        "recommendation",
         "ai_feedback"
     ]].head(10),
     use_container_width=True
 )
+
 
 st.markdown('<div class="section-title">Key Insights</div>', unsafe_allow_html=True)
 
@@ -279,3 +398,85 @@ if len(filtered_df) > 0:
     st.info("Low-performing products should be reviewed to identify possible quality, pricing, or customer satisfaction issues.")
 else:
     st.warning("No products match the selected filters.")
+
+
+st.markdown('<div class="section-title">AI Product Management Assistant</div>', unsafe_allow_html=True)
+
+st.markdown("""
+<div class="ai-box">
+This assistant helps Product Managers turn product feedback data into practical decisions.
+It can generate recommendations or answer questions based on the current dashboard filters.
+</div>
+""", unsafe_allow_html=True)
+
+data_summary = generate_data_summary(filtered_df)
+
+if st.button("Generate Product Management Recommendations"):
+    if len(filtered_df) == 0:
+        st.warning("No products match the selected filters.")
+    else:
+        with st.spinner("Generating AI recommendations..."):
+            prompt = f"""
+            Based on the product data summary below, provide product management recommendations.
+
+            DATA SUMMARY:
+            {data_summary}
+
+            Please include:
+            1. Main product management priorities
+            2. Risks or problem areas
+            3. Opportunities for growth
+            4. Suggested next actions
+
+            Keep the answer clear, practical, and useful for a Product Manager.
+            """
+
+            ai_result = ask_openai(prompt)
+            st.success("AI recommendations generated.")
+            st.write(ai_result)
+
+
+st.subheader("Suggested Questions")
+
+suggested_questions = [
+    "Which products should a Product Manager prioritize?",
+    "Which product category needs more attention?",
+    "What are the main risks in this dataset?",
+    "What actions should a Product Manager take next?",
+    "Which products have strong performance and should be promoted?",
+    "What should be investigated in low-performing products?"
+]
+
+selected_question = st.selectbox(
+    "Choose a suggested question",
+    [""] + suggested_questions
+)
+
+custom_question = st.text_input(
+    "Or ask your own question about the product data"
+)
+
+if st.button("Ask AI"):
+    final_question = custom_question if custom_question else selected_question
+
+    if not final_question:
+        st.warning("Please select a suggested question or type your own question.")
+    elif len(filtered_df) == 0:
+        st.warning("No products match the selected filters.")
+    else:
+        with st.spinner("AI is analyzing the product data..."):
+            prompt = f"""
+            Use only the product data summary below to answer the question.
+
+            DATA SUMMARY:
+            {data_summary}
+
+            QUESTION:
+            {final_question}
+
+            If the data does not provide enough information, say that clearly.
+            Give a practical answer from a Product Management perspective.
+            """
+
+            answer = ask_openai(prompt)
+            st.write(answer)
